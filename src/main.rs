@@ -4,7 +4,7 @@ use discrakt::{
     utils::{load_config, log},
 };
 use std::{thread::sleep, time::Duration};
-use tracing_subscriber::{fmt, EnvFilter, prelude::*};
+use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 fn init_logging() {
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));

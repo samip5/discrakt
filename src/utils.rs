@@ -6,8 +6,7 @@ use ureq::AgentBuilder;
 
 const REFRESH_TOKEN_TTL_SECS: u64 = 60 * 60 * 24 * 30 * 3; // 3 months
 
-#[derive(Deserialize)]
-#[derive(Debug)]
+#[derive(Deserialize, Debug)]
 pub struct TraktAccessToken {
     pub access_token: String,
     pub token_type: String,
