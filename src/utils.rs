@@ -1,8 +1,8 @@
 use chrono::{DateTime, FixedOffset, SecondsFormat, Utc};
 use configparser::ini::Ini;
 use serde::Deserialize;
-use std::{env, io, path::PathBuf, time::Duration};
 use std::sync::OnceLock;
+use std::{env, io, path::PathBuf, time::Duration};
 use ureq::AgentBuilder;
 
 const REFRESH_TOKEN_TTL_SECS: u64 = 60 * 60 * 24 * 30 * 3; // 3 months
@@ -13,7 +13,6 @@ pub fn user_agent() -> &'static str {
         .get_or_init(|| format!("{}/{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION")))
         .as_str()
 }
-
 
 #[derive(Deserialize, Debug)]
 pub struct TraktAccessToken {
