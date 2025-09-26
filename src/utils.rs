@@ -296,10 +296,15 @@ fn set_oauth_tokens(json_response: &TraktAccessToken) {
         "OAuthRefreshToken",
         Some(json_response.refresh_token.as_str()),
     );
+
+    // Store refresh token expiry as now + 3 months
+    let now = Utc::now().timestamp() as u64;
+    let refresh_token_expires_at = now + REFRESH_TOKEN_TTL_SECS;
+
     config.set(
         "Trakt API",
         "OAuthRefreshTokenExpiresAt",
-        Some(json_response.created_at.to_string()),
+        Some(refresh_token_expires_at.to_string()),
     );
     config.write(path).expect("Failed to write credentials.ini");
 }
