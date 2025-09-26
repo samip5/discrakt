@@ -79,7 +79,7 @@ jobs:
           gh release upload ${{ github.ref_name }} target/release/discrakt_win64.exe
 
   publish-mac:
-    runs-on: macos-14
+    runs-on: macos-15
 
     steps:
       - name: Checkout
