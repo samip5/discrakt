@@ -4,111 +4,449 @@ on:
   release:
     types: [published]
 
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
   publish-linux:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: "aarch64-unknown-linux-gnu, x86_64-unknown-linux-musl"
 
+      - name: Install system dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y libgtk-3-dev libappindicator3-dev libxdo-dev desktop-file-utils
+
+      - name: Install packaging tools
+        run: cargo install cargo-deb cargo-generate-rpm
+
       - name: Build amd64
         run: cargo build --release
 
-      - name: Prepare amd64 binary
+      - name: Extract version
+        id: version
         run: |
-          mv target/release/discrakt target/release/discrakt_amd64
-          chmod +x target/release/discrakt_amd64
+          VERSION="${{ github.event.release.tag_name }}"
+          VERSION="${VERSION#v}"
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Build amd64 .deb package
+        run: cargo deb --no-build --deb-version=${{ steps.version.outputs.VERSION }}
 
       - name: Install compiler tools (as we're cross-compiling)
-        run: |
-          sudo apt update
-          sudo apt install -y gcc-aarch64-linux-gnu
+        run: sudo apt install -y gcc-aarch64-linux-gnu
 
       - name: Build arm64
         run: cargo build --release --target=aarch64-unknown-linux-gnu
 
-      - name: Prepare arm64 Binary
+      - name: Build arm64 .deb package
+        run: cargo deb --no-build --target=aarch64-unknown-linux-gnu --deb-version=${{ steps.version.outputs.VERSION }}
+
+      - name: Build amd64 .rpm package
         run: |
-          mv target/aarch64-unknown-linux-gnu/release/discrakt target/release/discrakt_arm64
-          chmod +x target/release/discrakt_arm64
+          cargo generate-rpm --set-metadata="version = \"${{ steps.version.outputs.VERSION }}\"" --set-metadata="release = \"1\""
+          ls -la target/generate-rpm/ || echo "WARNING: target/generate-rpm directory not found"
+
+      - name: Build arm64 .rpm package
+        run: |
+          cargo generate-rpm --target=aarch64-unknown-linux-gnu --set-metadata="version = \"${{ steps.version.outputs.VERSION }}\"" --set-metadata="release = \"1\""
+          ls -la target/aarch64-unknown-linux-gnu/generate-rpm/ || echo "WARNING: target/aarch64-unknown-linux-gnu/generate-rpm directory not found"
+
+      - name: Build amd64 AppImage
+        run: |
+          mkdir -p target/appimage/Discrakt.AppDir/usr/bin
+          mkdir -p target/appimage/Discrakt.AppDir/usr/share/applications
+          mkdir -p target/appimage/Discrakt.AppDir/usr/share/icons/hicolor/256x256/apps
+
+          cp target/release/discrakt target/appimage/Discrakt.AppDir/usr/bin/
+          cp assets/discrakt.desktop target/appimage/Discrakt.AppDir/usr/share/applications/
+          cp assets/discrakt.desktop target/appimage/Discrakt.AppDir/
+          cp assets/Discrakt.iconset/icon_256x256.png target/appimage/Discrakt.AppDir/usr/share/icons/hicolor/256x256/apps/discrakt.png
+          cp assets/Discrakt.iconset/icon_256x256.png target/appimage/Discrakt.AppDir/discrakt.png
+
+          cat > target/appimage/Discrakt.AppDir/AppRun << 'APPRUN'
+          #!/bin/bash
+          SELF=$(readlink -f "$0")
+          HERE=${SELF%/*}
+          exec "${HERE}/usr/bin/discrakt" "$@"
+          APPRUN
+          sed -i 's/^          //' target/appimage/Discrakt.AppDir/AppRun
+          chmod +x target/appimage/Discrakt.AppDir/AppRun
+
+          wget -q https://github.com/AppImage/appimagetool/releases/download/1.9.0/appimagetool-x86_64.AppImage -O appimagetool
+          chmod +x appimagetool
+          ARCH=x86_64 ./appimagetool target/appimage/Discrakt.AppDir target/appimage/Discrakt-${{ steps.version.outputs.VERSION }}-x86_64.AppImage
+
+      - name: Build arm64 AppImage
+        run: |
+          rm -rf target/appimage/Discrakt.AppDir
+          mkdir -p target/appimage/Discrakt.AppDir/usr/bin
+          mkdir -p target/appimage/Discrakt.AppDir/usr/share/applications
+          mkdir -p target/appimage/Discrakt.AppDir/usr/share/icons/hicolor/256x256/apps
+
+          cp target/aarch64-unknown-linux-gnu/release/discrakt target/appimage/Discrakt.AppDir/usr/bin/
+          cp assets/discrakt.desktop target/appimage/Discrakt.AppDir/usr/share/applications/
+          cp assets/discrakt.desktop target/appimage/Discrakt.AppDir/
+          cp assets/Discrakt.iconset/icon_256x256.png target/appimage/Discrakt.AppDir/usr/share/icons/hicolor/256x256/apps/discrakt.png
+          cp assets/Discrakt.iconset/icon_256x256.png target/appimage/Discrakt.AppDir/discrakt.png
+
+          cat > target/appimage/Discrakt.AppDir/AppRun << 'APPRUN'
+          #!/bin/bash
+          SELF=$(readlink -f "$0")
+          HERE=${SELF%/*}
+          exec "${HERE}/usr/bin/discrakt" "$@"
+          APPRUN
+          sed -i 's/^          //' target/appimage/Discrakt.AppDir/AppRun
+          chmod +x target/appimage/Discrakt.AppDir/AppRun
+
+          wget -q https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-aarch64 -O runtime-aarch64
+          ARCH=aarch64 ./appimagetool --runtime-file runtime-aarch64 target/appimage/Discrakt.AppDir target/appimage/Discrakt-${{ steps.version.outputs.VERSION }}-aarch64.AppImage
 
       - name: Upload binaries
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release upload ${{ github.ref_name }} target/release/discrakt_arm64
-          gh release upload ${{ github.ref_name }} target/release/discrakt_amd64
-          gh release upload ${{ github.ref_name }} credentials.ini
+          gh release upload ${{ github.ref_name }} target/debian/discrakt_${{ steps.version.outputs.VERSION }}_amd64.deb
+          gh release upload ${{ github.ref_name }} target/aarch64-unknown-linux-gnu/debian/discrakt_${{ steps.version.outputs.VERSION }}_arm64.deb
+          gh release upload ${{ github.ref_name }} target/generate-rpm/discrakt-${{ steps.version.outputs.VERSION }}-1.x86_64.rpm
+          gh release upload ${{ github.ref_name }} target/aarch64-unknown-linux-gnu/generate-rpm/discrakt-${{ steps.version.outputs.VERSION }}-1.aarch64.rpm
+          gh release upload ${{ github.ref_name }} target/appimage/Discrakt-${{ steps.version.outputs.VERSION }}-x86_64.AppImage
+          gh release upload ${{ github.ref_name }} target/appimage/Discrakt-${{ steps.version.outputs.VERSION }}-aarch64.AppImage
 
   publish-win:
     runs-on: windows-latest
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install WiX Toolset v6
+        run: dotnet tool install --global wix --version 6.0.2
+
+      - name: Extract version
+        id: version
+        run: |
+          $version = "${{ github.event.release.tag_name }}".TrimStart('v')
+          echo "VERSION=$version" >> $env:GITHUB_OUTPUT
+
       - name: Build win64
+        env:
+          DISCRAKT_VERSION: ${{ steps.version.outputs.VERSION }}
         run: cargo build --release
 
-      - name: Prepare win64 Binary
-        run: mv target/release/discrakt.exe target/release/discrakt_win64.exe
+      - name: Build MSI installer
+        run: |
+          New-Item -ItemType Directory -Force -Path target/wix
+          wix build -arch x64 -o "target/wix/Discrakt_${{ steps.version.outputs.VERSION }}_win64.msi" assets/Package.wxs
 
-      - name: Create silent win64 executable
-        run: sed -i '1i\#\!\[windows_subsystem\ \=\ \"windows\"\]' src/main.rs
-
-      - name: Build silent win64 executable
-        run: cargo build --release
-
-      - name: Prepare silent win64 Binary
-        run: mv target/release/discrakt.exe target/release/discrakt_win64_silent.exe
+      - name: Verify MSI
+        run: |
+          $msiPath = "target/wix/Discrakt_${{ steps.version.outputs.VERSION }}_win64.msi"
+          if (-not (Test-Path $msiPath)) {
+            Write-Error "MSI file not found at $msiPath"
+            exit 1
+          }
+          Write-Host "MSI created successfully: $msiPath"
 
       - name: Upload binaries
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release upload ${{ github.ref_name }} target/release/discrakt_win64_silent.exe
-          gh release upload ${{ github.ref_name }} target/release/discrakt_win64.exe
+          # Upload MSI installer
+          gh release upload ${{ github.ref_name }} "target/wix/Discrakt_${{ steps.version.outputs.VERSION }}_win64.msi"
+          # Upload standalone exe for Scoop
+          Copy-Item "target/release/discrakt.exe" "target/release/discrakt_win64.exe"
+          gh release upload ${{ github.ref_name }} "target/release/discrakt_win64.exe"
 
-  publish-mac:
+  publish-macos:
     runs-on: macos-14
+    permissions:
+      contents: write
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "10.13"
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: "aarch64-apple-darwin, x86_64-apple-darwin"
 
-      - name: Build darwin
-        run: cargo build --release --target=x86_64-apple-darwin
+      - name: Cache cargo
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Prepare darwin binary
+      - name: Extract version
+        id: version
         run: |
-          mv target/x86_64-apple-darwin/release/discrakt target/release/discrakt_darwin
-          chmod +x target/release/discrakt_darwin
+          VERSION="${{ github.event.release.tag_name }}"
+          VERSION="${VERSION#v}"
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
 
-      - name: Build darwin arm64
+      - name: Build arm64 (Apple Silicon)
         run: cargo build --release --target=aarch64-apple-darwin
 
-      - name: Prepare darwin arm64 binary
+      - name: Build x86_64 (Intel)
+        run: cargo build --release --target=x86_64-apple-darwin
+
+      - name: Create universal binary
         run: |
-          mv target/aarch64-apple-darwin/release/discrakt target/release/discrakt_darwin_arm64
-          chmod +x target/release/discrakt_darwin_arm64
+          mkdir -p target/release
+          lipo -create \
+            target/aarch64-apple-darwin/release/discrakt \
+            target/x86_64-apple-darwin/release/discrakt \
+            -output target/release/discrakt
+          chmod +x target/release/discrakt
+
+      - name: Verify universal binary
+        run: |
+          file target/release/discrakt
+          lipo -info target/release/discrakt
+
+      - name: Create app bundle structure
+        run: |
+          APP_NAME="Discrakt"
+          APP_BUNDLE="target/release/${APP_NAME}.app"
+
+          mkdir -p "${APP_BUNDLE}/Contents/MacOS"
+          mkdir -p "${APP_BUNDLE}/Contents/Resources"
+
+          cp target/release/discrakt "${APP_BUNDLE}/Contents/MacOS/discrakt"
+          cp assets/Discrakt.icns "${APP_BUNDLE}/Contents/Resources/Discrakt.icns"
+
+      - name: Create Info.plist
+        run: |
+          APP_BUNDLE="target/release/Discrakt.app"
+          VERSION="${{ steps.version.outputs.VERSION }}"
+
+          cat > "${APP_BUNDLE}/Contents/Info.plist" << EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleDevelopmentRegion</key>
+              <string>en</string>
+              <key>CFBundleDisplayName</key>
+              <string>Discrakt</string>
+              <key>CFBundleExecutable</key>
+              <string>discrakt</string>
+              <key>CFBundleIconFile</key>
+              <string>Discrakt</string>
+              <key>CFBundleIdentifier</key>
+              <string>com.afonsojramos.discrakt</string>
+              <key>CFBundleInfoDictionaryVersion</key>
+              <string>6.0</string>
+              <key>CFBundleName</key>
+              <string>Discrakt</string>
+              <key>CFBundlePackageType</key>
+              <string>APPL</string>
+              <key>CFBundleShortVersionString</key>
+              <string>${VERSION}</string>
+              <key>CFBundleVersion</key>
+              <string>${VERSION}</string>
+              <key>LSApplicationCategoryType</key>
+              <string>public.app-category.utilities</string>
+              <key>LSMinimumSystemVersion</key>
+              <string>10.13</string>
+              <key>LSUIElement</key>
+              <true/>
+              <key>NSHighResolutionCapable</key>
+              <true/>
+              <key>NSHumanReadableCopyright</key>
+              <string>Copyright © afonsojramos. All rights reserved.</string>
+              <key>NSPrincipalClass</key>
+              <string>NSApplication</string>
+              <key>NSSupportsAutomaticGraphicsSwitching</key>
+              <true/>
+          </dict>
+          </plist>
+          EOF
+
+      - name: Import code signing certificate
+        if: env.BUILD_CERTIFICATE_BASE64 != ''
+        env:
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.MACOS_CERTIFICATE_BASE64 }}
+          P12_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
+        run: |
+          CERTIFICATE_PATH=$RUNNER_TEMP/build_certificate.p12
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+
+          echo -n "$BUILD_CERTIFICATE_BASE64" | base64 --decode -o $CERTIFICATE_PATH
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+
+          security import $CERTIFICATE_PATH -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security list-keychain -d user -s $KEYCHAIN_PATH
+
+      - name: Sign app bundle
+        if: env.MACOS_SIGNING_IDENTITY != ''
+        env:
+          MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+        run: |
+          codesign --force --options runtime \
+            --sign "$MACOS_SIGNING_IDENTITY" \
+            --timestamp \
+            "target/release/Discrakt.app/Contents/MacOS/discrakt"
+
+          codesign --force --options runtime \
+            --sign "$MACOS_SIGNING_IDENTITY" \
+            --timestamp \
+            "target/release/Discrakt.app"
+
+          codesign --verify --deep --strict --verbose=2 "target/release/Discrakt.app"
+
+      - name: Ad-hoc sign (if no certificate)
+        if: env.MACOS_SIGNING_IDENTITY == ''
+        env:
+          MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+        run: |
+          codesign --force --deep --sign - "target/release/Discrakt.app"
+
+      - name: Install create-dmg
+        run: brew install create-dmg
+
+      - name: Create DMG
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+
+          create-dmg \
+            --volname "Discrakt ${VERSION}" \
+            --volicon "assets/Discrakt.icns" \
+            --window-pos 200 120 \
+            --window-size 600 400 \
+            --icon-size 100 \
+            --icon "Discrakt.app" 150 185 \
+            --hide-extension "Discrakt.app" \
+            --app-drop-link 450 185 \
+            --no-internet-enable \
+            "target/release/Discrakt_${VERSION}_universal.dmg" \
+            "target/release/Discrakt.app" || true
+
+          if [ ! -f "target/release/Discrakt_${VERSION}_universal.dmg" ]; then
+            hdiutil create -volname "Discrakt ${VERSION}" \
+              -srcfolder "target/release/Discrakt.app" \
+              -ov -format UDZO \
+              "target/release/Discrakt_${VERSION}_universal.dmg"
+          fi
+
+      - name: Notarize DMG
+        if: env.APPLE_ID != '' && env.APPLE_APP_PASSWORD != '' && env.APPLE_TEAM_ID != ''
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          DMG_PATH="target/release/Discrakt_${{ steps.version.outputs.VERSION }}_universal.dmg"
+
+          xcrun notarytool submit "$DMG_PATH" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_APP_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+
+          xcrun stapler staple "$DMG_PATH"
+          xcrun stapler validate "$DMG_PATH"
+
+      - name: Create Homebrew tarballs
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+
+          # Create arm64 tarball
+          mkdir -p target/homebrew/arm64
+          cp target/aarch64-apple-darwin/release/discrakt target/homebrew/arm64/
+          tar -czf "target/homebrew/discrakt-${VERSION}-aarch64-apple-darwin.tar.gz" -C target/homebrew/arm64 discrakt
+
+          # Create x86_64 tarball
+          mkdir -p target/homebrew/x86_64
+          cp target/x86_64-apple-darwin/release/discrakt target/homebrew/x86_64/
+          tar -czf "target/homebrew/discrakt-${VERSION}-x86_64-apple-darwin.tar.gz" -C target/homebrew/x86_64 discrakt
+
+          # Generate SHA256 checksums for Homebrew formula
+          echo "SHA256 checksums for Homebrew formula:"
+          shasum -a 256 target/homebrew/discrakt-${VERSION}-aarch64-apple-darwin.tar.gz
+          shasum -a 256 target/homebrew/discrakt-${VERSION}-x86_64-apple-darwin.tar.gz
 
       - name: Upload binaries
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release upload ${{ github.ref_name }} target/release/discrakt_darwin_arm64
-          gh release upload ${{ github.ref_name }} target/release/discrakt_darwin
+          gh release upload "${{ github.ref_name }}" \
+            "target/release/Discrakt_${{ steps.version.outputs.VERSION }}_universal.dmg" \
+            "target/homebrew/discrakt-${{ steps.version.outputs.VERSION }}-aarch64-apple-darwin.tar.gz" \
+            "target/homebrew/discrakt-${{ steps.version.outputs.VERSION }}-x86_64-apple-darwin.tar.gz" \
+            --clobber
+
+  update-winget:
+    needs: publish-win
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Update Winget package
+        uses: vedantmgoyal9/winget-releaser@19e706d4c9121098010096f9c495a70a7518b30f # main
+        with:
+          identifier: afonsojramos.discrakt
+          installers-regex: '\.msi$'
+          token: ${{ secrets.WINGET_TOKEN }}
+
+  update-homebrew:
+    needs: publish-macos
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Extract version
+        id: version
+        run: |
+          VERSION="${{ github.event.release.tag_name }}"
+          VERSION="${VERSION#v}"
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Trigger Homebrew formula update
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          VERSION: ${{ steps.version.outputs.VERSION }}
+        run: |
+          if [ -n "$HOMEBREW_TAP_TOKEN" ]; then
+            PAYLOAD=$(jq -n --arg version "$VERSION" '{"event_type":"update-formula","client_payload":{"version":$version}}')
+            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+              -H "Accept: application/vnd.github.v3+json" \
+              -H "Authorization: token $HOMEBREW_TAP_TOKEN" \
+              https://api.github.com/repos/afonsojramos/homebrew-discrakt/dispatches \
+              -d "$PAYLOAD")
+            if [ "$HTTP_STATUS" -ge 200 ] && [ "$HTTP_STATUS" -lt 300 ]; then
+              echo "Triggered Homebrew formula update (HTTP $HTTP_STATUS)"
+            else
+              echo "Failed to trigger Homebrew formula update (HTTP $HTTP_STATUS)"
+              exit 1
+            fi
+          else
+            echo "HOMEBREW_TAP_TOKEN not set - skipping Homebrew update"
+            echo "To enable automatic updates, create a PAT and add it as HOMEBREW_TAP_TOKEN secret"
+          fi

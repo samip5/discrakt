@@ -1,6 +1,6 @@
 [package]
 name = "discrakt"
-version = "2.2.3"
+version = "0.0.0"
 edition = "2021"
 authors = ["afonsojramos"]
 description = "Easy to Use Trakt/Plex Discord Rich Presence"
@@ -8,16 +8,105 @@ repository = "https://github.com/afonsojramos/discrakt"
 license = "MIT"
 keywords = ["discord", "trakt", "rust"]
 readme = "README.md"
-exclude = [".github/*", "images/*.psd", "credentials.ini", ".gitignore"]
+exclude = [".github/*", "docs/*.psd", "credentials.ini", ".gitignore"]
 
 [dependencies]
-discord-rich-presence = "0.2.5"
-ureq = { version = "2.12.1", features = ["json"] }
+discord-rich-presence = "1.1.0"
+ureq = { version = "3", features = ["json"] }
 configparser = { version = "3.1.0", features = ["indexmap"] }
-serde = { version = "1.0.226", features = ["derive"] }
-chrono = "0.4.41"
-webbrowser = "1.0.5"
+serde = { version = "1.0.228", features = ["derive"] }
+thiserror = "2"
+backon = "1.6"
+serde_json = "1.0"
+chrono = "0.4.43"
+webbrowser = "1.0.6"
 dirs = "6.0.0"
+image = { version = "0.25", default-features = false, features = ["png"] }
+dark-light = "2.0"
+crossbeam-channel = "0.5"
+winit = "0.30"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
+tiny_http = "0.12"
+sys-locale = "0.3"
+lru = "0.16"
+percent-encoding = "2.3"
+
+# Platform-specific tray dependencies:
+# - Linux: ksni for native KDE/freedesktop StatusNotifierItem support
+# - Windows/macOS: tray-icon crate
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+tray-icon = "0.21"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+ksni = { version = "0.3", default-features = false, features = ["blocking", "async-io"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit = "0.3"
+objc2-foundation = "0.3"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+winreg = "0.55"
+
+[target.'cfg(target_os = "windows")'.build-dependencies]
+winresource = "0.1.30"
+
+[dev-dependencies]
+mockito = "1.7"
+tempfile = "3.24"
+serial_test = "3.3"
 
 [profile.release]
 strip = "debuginfo"
+lto = "thin"
+codegen-units = 1
+opt-level = 2
+
+[package.metadata.bundle]
+name = "Discrakt"
+identifier = "com.afonsojramos.discrakt"
+icon = ["assets/Discrakt.icns"]
+version = "0.0.0"
+copyright = "Copyright (c) afonsojramos. All rights reserved."
+category = "public.app-category.utilities"
+short_description = "Trakt to Discord Rich Presence"
+long_description = """
+Discrakt bridges your Trakt.tv watching status to Discord Rich Presence.
+It runs silently in your system tray and automatically updates your Discord
+status when you're watching movies or TV shows tracked by Trakt.tv.
+"""
+osx_minimum_system_version = "10.13"
+
+[package.metadata.deb]
+maintainer = "afonsojramos <afonsojorgeramos@gmail.com>"
+copyright = "Copyright (c) afonsojramos. All rights reserved."
+license-file = ["LICENSE", "0"]
+extended-description = """
+Discrakt bridges your Trakt.tv watching status to Discord Rich Presence.
+It runs silently in your system tray and automatically updates your Discord
+status when you're watching movies or TV shows tracked by Trakt.tv.
+"""
+section = "utils"
+priority = "optional"
+depends = "$auto"
+assets = [
+    ["target/release/discrakt", "usr/bin/", "755"],
+    ["assets/discrakt.desktop", "usr/share/applications/", "644"],
+    ["assets/Discrakt.iconset/icon_16x16.png", "usr/share/icons/hicolor/16x16/apps/discrakt.png", "644"],
+    ["assets/Discrakt.iconset/icon_32x32.png", "usr/share/icons/hicolor/32x32/apps/discrakt.png", "644"],
+    ["assets/Discrakt.iconset/icon_128x128.png", "usr/share/icons/hicolor/128x128/apps/discrakt.png", "644"],
+    ["assets/Discrakt.iconset/icon_256x256.png", "usr/share/icons/hicolor/256x256/apps/discrakt.png", "644"],
+    ["assets/Discrakt.iconset/icon_512x512.png", "usr/share/icons/hicolor/512x512/apps/discrakt.png", "644"],
+]
+
+[package.metadata.generate-rpm]
+assets = [
+    { source = "target/release/discrakt", dest = "/usr/bin/discrakt", mode = "755" },
+    { source = "assets/discrakt.desktop", dest = "/usr/share/applications/discrakt.desktop", mode = "644" },
+    { source = "assets/Discrakt.iconset/icon_16x16.png", dest = "/usr/share/icons/hicolor/16x16/apps/discrakt.png", mode = "644" },
+    { source = "assets/Discrakt.iconset/icon_32x32.png", dest = "/usr/share/icons/hicolor/32x32/apps/discrakt.png", mode = "644" },
+    { source = "assets/Discrakt.iconset/icon_128x128.png", dest = "/usr/share/icons/hicolor/128x128/apps/discrakt.png", mode = "644" },
+    { source = "assets/Discrakt.iconset/icon_256x256.png", dest = "/usr/share/icons/hicolor/256x256/apps/discrakt.png", mode = "644" },
+    { source = "assets/Discrakt.iconset/icon_512x512.png", dest = "/usr/share/icons/hicolor/512x512/apps/discrakt.png", mode = "644" },
+]
