@@ -83,7 +83,7 @@ jobs:
           sed -i 's/^          //' target/appimage/Discrakt.AppDir/AppRun
           chmod +x target/appimage/Discrakt.AppDir/AppRun
 
-          wget -q https://github.com/AppImage/appimagetool/releases/download/1.9.0/appimagetool-x86_64.AppImage -O appimagetool
+          wget -q https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage -O appimagetool
           chmod +x appimagetool
           ARCH=x86_64 ./appimagetool target/appimage/Discrakt.AppDir target/appimage/Discrakt-${{ steps.version.outputs.VERSION }}-x86_64.AppImage
 
